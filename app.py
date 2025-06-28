@@ -518,3 +518,8 @@ Security Alerts:
 
 if __name__ == "__main__":
     main()
+
+
+st.markdown("---")
+st.caption("📌 Project by: Nattakaiwan")
+
