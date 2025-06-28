@@ -155,7 +155,7 @@ class StreamlitHTTPLogAnalyzer:
 
 def main():
     st.markdown('<h1 class="main-header">📊 HTTP Log Analyzer</h1>', unsafe_allow_html=True)
-    st.markdown("### วิเคราะห์ไฟล์ Log ของ Web Server อย่างครอบคลุม")
+    st.markdown("### วิเคราะห์ไฟล์ Log ของ Web Server")
     
     analyzer = StreamlitHTTPLogAnalyzer()
     
