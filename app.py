@@ -816,6 +816,7 @@ if __name__ == "__main__":
 # Disclaimer    
 st.markdown("--Disclaimer --")
 st.caption("นโยบายการจัดการไฟล์: เมื่อคุณทำการอัปโหลดไฟล์มายังแอปพลิเคชันนี้ โปรดทราบว่าไฟล์เหล่านี้จะถูกประมวลผลอยู่ ในหน่วยความจำ (in-memory) ของระบบเท่านั้น เพื่อวัตถุประสงค์ในการวิเคราะห์ข้อมูลภายในช่วงเวลาที่คุณใช้งานแอปพลิเคชันอยู่ เราขอรับรองว่า เราไม่มีการจัดเก็บ บันทึก หรือเก็บรักษาไฟล์ที่คุณอัปโหลดไว้บนเซิร์ฟเวอร์ของเรา หรือพื้นที่จัดเก็บถาวรใดๆ หลังจากที่คุณสิ้นสุดการใช้งาน หรือเมื่อแอปพลิเคชันปิดลง ความเป็นส่วนตัวและความปลอดภัยของข้อมูลของคุณคือสิ่งที่เราให้ความสำคัญ และเรามุ่งมั่นที่จะทำให้มั่นใจว่าข้อมูลที่คุณอัปโหลดจะยังคงเป็นความลับและไม่ถูกจัดเก็บอย่างถาวร")
+st.caption("File Handling Policy: When you upload files to this application, please be aware that these files are processed in-memory for the sole purpose of analysis during your active session. We want to assure you that we do not store, save, or retain your uploaded files on our servers or any persistent storage after your session ends or the application is closed. Your privacy and data security are important to us, and we are committed to ensuring that your uploaded data remains confidential and is not permanently stored.")
 
 # Credit by
 st.markdown("---")
