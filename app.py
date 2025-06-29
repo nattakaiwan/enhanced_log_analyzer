@@ -14,6 +14,15 @@ import io
 import warnings
 warnings.filterwarnings('ignore')
 
+# PDF Report imports
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+import base64
+
 # Configure Streamlit page
 st.set_page_config(
     page_title="HTTP Log Analyzer",
@@ -49,8 +58,247 @@ st.markdown("""
         border-radius: 0.5rem;
         border-left: 5px solid #dc3545;
     }
+    .pdf-button {
+        background-color: #dc3545;
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 0.25rem;
+        text-decoration: none;
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+class PDFReportGenerator:
+    def __init__(self, df, suspicious_activities):
+        self.df = df
+        self.suspicious_activities = suspicious_activities
+        self.styles = getSampleStyleSheet()
+        self.title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=self.styles['Heading1'],
+            fontSize=24,
+            spaceAfter=30,
+            alignment=TA_CENTER,
+            textColor=colors.darkblue
+        )
+        self.heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=self.styles['Heading2'],
+            fontSize=16,
+            spaceAfter=12,
+            textColor=colors.darkblue
+        )
+        
+    def create_matplotlib_chart(self, chart_type, data, title, filename):
+        """สร้างกราฟด้วย matplotlib และบันทึกเป็นไฟล์"""
+        plt.figure(figsize=(10, 6))
+        plt.style.use('default')
+        
+        if chart_type == 'bar':
+            plt.bar(range(len(data)), data.values)
+            plt.xticks(range(len(data)), data.index, rotation=45, ha='right')
+        elif chart_type == 'line':
+            plt.plot(data.index, data.values, marker='o')
+            plt.xticks(rotation=45)
+        elif chart_type == 'pie':
+            plt.pie(data.values, labels=data.index, autopct='%1.1f%%')
+        
+        plt.title(title, fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        
+        # Save to BytesIO
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+        img_buffer.seek(0)
+        plt.close()
+        
+        return img_buffer
+    
+    def generate_pdf_report(self):
+        """สร้าง PDF Report"""
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        story = []
+        
+        # Title
+        title = Paragraph("HTTP Log Analysis Report", self.title_style)
+        story.append(title)
+        story.append(Spacer(1, 20))
+        
+        # Report Generation Date
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        date_para = Paragraph(f"<b>Generated:</b> {date_str}", self.styles['Normal'])
+        story.append(date_para)
+        story.append(Spacer(1, 20))
+        
+        # Executive Summary
+        story.append(Paragraph("Executive Summary", self.heading_style))
+        
+        summary_data = [
+            ['Metric', 'Value'],
+            ['Total Requests', f"{len(self.df):,}"],
+            ['Unique IP Addresses', f"{self.df['ip'].nunique():,}"],
+            ['Unique URLs', f"{self.df['url'].nunique():,}"],
+            ['Date Range', f"{self.df['timestamp'].min().strftime('%Y-%m-%d')} to {self.df['timestamp'].max().strftime('%Y-%m-%d')}"],
+            ['Error Rate', f"{len(self.df[self.df['status_code'] >= 400]) / len(self.df) * 100:.1f}%"]
+        ]
+        
+        summary_table = Table(summary_data)
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(summary_table)
+        story.append(Spacer(1, 20))
+        
+        # Top IP Addresses
+        story.append(Paragraph("Top 10 IP Addresses", self.heading_style))
+        top_ips = self.df['ip'].value_counts().head(10)
+        
+        # Create chart
+        chart_buffer = self.create_matplotlib_chart('bar', top_ips, 'Top 10 IP Addresses by Request Count', 'top_ips.png')
+        chart_img = Image(chart_buffer, width=6*inch, height=3.6*inch)
+        story.append(chart_img)
+        story.append(Spacer(1, 20))
+        
+        # Top IP table
+        ip_data = [['IP Address', 'Request Count', 'Percentage']]
+        for ip, count in top_ips.items():
+            percentage = (count / len(self.df)) * 100
+            ip_data.append([ip, f"{count:,}", f"{percentage:.1f}%"])
+        
+        ip_table = Table(ip_data)
+        ip_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(ip_table)
+        story.append(PageBreak())
+        
+        # Status Code Distribution
+        story.append(Paragraph("HTTP Status Code Distribution", self.heading_style))
+        status_counts = self.df['status_code'].value_counts()
+        
+        # Create pie chart
+        chart_buffer = self.create_matplotlib_chart('pie', status_counts, 'HTTP Status Code Distribution', 'status_codes.png')
+        chart_img = Image(chart_buffer, width=6*inch, height=3.6*inch)
+        story.append(chart_img)
+        story.append(Spacer(1, 20))
+        
+        # Status code table
+        status_data = [['Status Code', 'Count', 'Percentage']]
+        for status, count in status_counts.items():
+            percentage = (count / len(self.df)) * 100
+            status_data.append([str(status), f"{count:,}", f"{percentage:.1f}%"])
+        
+        status_table = Table(status_data)
+        status_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(status_table)
+        story.append(PageBreak())
+        
+        # Traffic Patterns
+        story.append(Paragraph("Traffic Patterns", self.heading_style))
+        
+        # Hourly traffic
+        hourly_pattern = self.df['hour_of_day'].value_counts().sort_index()
+        chart_buffer = self.create_matplotlib_chart('line', hourly_pattern, 'Traffic Pattern by Hour of Day', 'hourly_traffic.png')
+        chart_img = Image(chart_buffer, width=6*inch, height=3.6*inch)
+        story.append(chart_img)
+        story.append(Spacer(1, 20))
+        
+        # Daily traffic
+        daily_requests = self.df.groupby('date').size()
+        chart_buffer = self.create_matplotlib_chart('line', daily_requests, 'Daily Request Trend', 'daily_traffic.png')
+        chart_img = Image(chart_buffer, width=6*inch, height=3.6*inch)
+        story.append(chart_img)
+        story.append(PageBreak())
+        
+        # Security Analysis
+        story.append(Paragraph("Security Analysis", self.heading_style))
+        
+        # Security summary
+        security_text = f"""
+        <b>Security Alert Summary:</b><br/>
+        • High Request IPs: {len(self.suspicious_activities['high_request_ips'])} detected<br/>
+        • Suspicious 404 Patterns: {len(self.suspicious_activities['suspicious_404'])} IPs<br/>
+        • Suspicious URLs: {len(self.suspicious_activities['suspicious_urls'])} detected<br/>
+        """
+        story.append(Paragraph(security_text, self.styles['Normal']))
+        story.append(Spacer(1, 20))
+        
+        # High request IPs
+        if len(self.suspicious_activities['high_request_ips']) > 0:
+            story.append(Paragraph("High Request IP Addresses", self.styles['Heading3']))
+            high_req_data = [['IP Address', 'Request Count', 'Risk Level']]
+            for ip, count in self.suspicious_activities['high_request_ips'].head(10).items():
+                risk_level = "High" if count > self.df['ip'].value_counts().quantile(0.99) else "Medium"
+                high_req_data.append([ip, f"{count:,}", risk_level])
+            
+            high_req_table = Table(high_req_data)
+            high_req_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.red),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.lightcoral),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(high_req_table)
+            story.append(Spacer(1, 20))
+        
+        # Suspicious URLs
+        if self.suspicious_activities['suspicious_urls']:
+            story.append(Paragraph("Suspicious URLs Detected", self.styles['Heading3']))
+            sus_urls_text = "<br/>".join([f"• {url}" for url in self.suspicious_activities['suspicious_urls'][:10]])
+            story.append(Paragraph(sus_urls_text, self.styles['Normal']))
+            story.append(Spacer(1, 20))
+        
+        # Recommendations
+        story.append(Paragraph("Recommendations", self.heading_style))
+        recommendations = """
+        <b>Based on the analysis, we recommend:</b><br/>
+        1. Monitor high-traffic IP addresses for potential DDoS attacks<br/>
+        2. Investigate suspicious URL patterns for security vulnerabilities<br/>
+        3. Review 404 error patterns to identify potential scanning attempts<br/>
+        4. Implement rate limiting for high-request IP addresses<br/>
+        5. Enhance monitoring during peak traffic hours<br/>
+        6. Regular security audits of frequently accessed endpoints<br/>
+        """
+        story.append(Paragraph(recommendations, self.styles['Normal']))
+        
+        # Footer
+        story.append(Spacer(1, 40))
+        footer_text = f"<i>Report generated by HTTP Log Analyzer - {date_str}</i>"
+        story.append(Paragraph(footer_text, self.styles['Normal']))
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        return buffer
 
 class StreamlitHTTPLogAnalyzer:
     def __init__(self):
@@ -174,7 +422,12 @@ def main():
 192.168.1.2 - - [19/Jun/2025:10:00:02 +0000] "POST /login HTTP/1.1" 302 0
 192.168.1.3 - - [19/Jun/2025:10:00:03 +0000] "GET /admin HTTP/1.1" 404 512
 192.168.1.1 - - [19/Jun/2025:10:00:04 +0000] "GET /style.css HTTP/1.1" 200 2048
-192.168.1.4 - - [19/Jun/2025:10:00:05 +0000] "POST /api/data HTTP/1.1" 500 128"""
+192.168.1.4 - - [19/Jun/2025:10:00:05 +0000] "POST /api/data HTTP/1.1" 500 128
+192.168.1.1 - - [19/Jun/2025:11:00:01 +0000] "GET /admin/login HTTP/1.1" 404 512
+192.168.1.5 - - [19/Jun/2025:11:00:02 +0000] "GET /wp-admin HTTP/1.1" 404 512
+192.168.1.1 - - [19/Jun/2025:12:00:01 +0000] "GET /index.html HTTP/1.1" 200 1234
+192.168.1.6 - - [19/Jun/2025:13:00:01 +0000] "GET /phpmyadmin HTTP/1.1" 404 512
+192.168.1.1 - - [19/Jun/2025:14:00:01 +0000] "GET /index.html HTTP/1.1" 200 1234"""
         
         analyzer.df = analyzer.parse_log_data(sample_data)
     
@@ -193,10 +446,11 @@ def main():
     
     if analyzer.df is not None and not analyzer.df.empty:
         df = analyzer.df
+        suspicious_activities = analyzer.detect_suspicious_activity(df)
         
         # Summary Statistics
         st.header("📈 สรุปข้อมูลรวม")
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
             st.metric("🔢 Total Requests", f"{len(df):,}")
@@ -207,6 +461,27 @@ def main():
         with col4:
             error_rate = len(df[df['status_code'] >= 400]) / len(df) * 100
             st.metric("⚠️ Error Rate", f"{error_rate:.1f}%")
+        with col5:
+            # PDF Report Generation Button
+            if st.button("📄 Generate PDF Report", type="primary"):
+                with st.spinner("🔄 กำลังสร้างรายงาน PDF..."):
+                    try:
+                        pdf_generator = PDFReportGenerator(df, suspicious_activities)
+                        pdf_buffer = pdf_generator.generate_pdf_report()
+                        
+                        # Create download button for PDF
+                        st.download_button(
+                            label="📥 ดาวน์โหลดรายงาน PDF",
+                            data=pdf_buffer.getvalue(),
+                            file_name=f"http_log_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                            mime="application/pdf",
+                            type="primary"
+                        )
+                        st.success("✅ รายงาน PDF สร้างเสร็จเรียบร้อย!")
+                        
+                    except Exception as e:
+                        st.error(f"❌ เกิดข้อผิดพลาดในการสร้างรายงาน PDF: {str(e)}")
+                        st.info("💡 กรุณาติดตั้ง reportlab ด้วยคำสั่ง: pip install reportlab")
         
         # Time range
         st.info(f"📅 **ช่วงเวลาข้อมูล:** {df['timestamp'].min()} ถึง {df['timestamp'].max()}")
@@ -348,8 +623,6 @@ def main():
         with tab4:
             st.header("🔒 การวิเคราะห์ความปลอดภัย")
             
-            suspicious_activities = analyzer.detect_suspicious_activity(df)
-            
             # Security alerts
             col1, col2, col3 = st.columns(3)
             
@@ -463,7 +736,7 @@ def main():
         
         # Download processed data
         st.header("💾 ดาวน์โหลดข้อมูล")
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             csv = df.to_csv(index=False)
@@ -504,6 +777,27 @@ Security Alerts:
                 file_name="log_analysis_summary.txt",
                 mime="text/plain"
             )
+        
+        with col3:
+            # Enhanced PDF Report Button
+            if st.button("📊 สร้างรายงาน PDF แบบเต็ม", type="primary"):
+                with st.spinner("🔄 กำลังสร้างรายงาน PDF แบบเต็ม..."):
+                    try:
+                        pdf_generator = PDFReportGenerator(df, suspicious_activities)
+                        pdf_buffer = pdf_generator.generate_pdf_report()
+                        
+                        st.download_button(
+                            label="📥 ดาวน์โหลดรายงาน PDF แบบเต็ม",
+                            data=pdf_buffer.getvalue(),
+                            file_name=f"complete_http_log_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                            mime="application/pdf",
+                            type="primary"
+                        )
+                        st.success("✅ รายงาน PDF แบบเต็มสร้างเสร็จเรียบร้อย!")
+                        
+                    except Exception as e:
+                        st.error(f"❌ เกิดข้อผิดพลาดในการสร้างรายงาน PDF: {str(e)}")
+                        st.info("💡 กรุณาติดตั้ง reportlab ด้วยคำสั่ง: pip install reportlab")
     
     else:
         st.info("👆 กรุณาอัปโหลดไฟล์ Log หรือใช้ข้อมูลตัวอย่างเพื่อเริ่มการวิเคราะห์")
@@ -519,7 +813,5 @@ Security Alerts:
 if __name__ == "__main__":
     main()
 
-
 st.markdown("---")
 st.caption("📌 Project by: Nattakaiwan")
-
